@@ -4,7 +4,9 @@ import numpy as np
 import random
 import operator
 import pickle
-
+import pygame
+import sys
+from pygame.locals import *
 
 class QLearning:
     def __init__(self, q_table={}, alpha=0.1, gamma=0.6, epsilon=0.1):
@@ -111,10 +113,56 @@ class QLearning:
         print("Training finished.\n")
         print(len(self.q_table))
         with open('q_table.pickle', 'wb') as handle:
-            pickle.dump(a, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self.q_table, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+    def gameplay(self):
+        while True:
+            self.env.reset()
+            state = self.state
+
+            done = False
+
+            while not done:
+                if len(self.get_available_moves()) == 0:
+                    print("match draw!!")
+                    break
+
+                # player 1 : Agent
+                try :
+                    agent_action = max(self.get_qvalue(state).items(), key=operator.itemgetter(1))[0]
+                except:
+                    agent_action = random.sample(self.get_available_moves(), 1)[0]
+
+                next_state, reward, done, info = self.env.step(agent_action)
+                next_state = self.env.board.board
+
+                self.env.render()
+                if reward == 1:
+                    print("player 1 wins")
+                    event = pygame.event.wait()
+                    break
+
+                # player 2 : Take user Input
+                #pressed = pygame.key.get_pressed()
+                #print(pressed)
+                while True:
+                    event = pygame.event.wait()
+                    if event.type == QUIT:
+                        pygame.quit()
+                        sys.exit()
+                    elif event.type == KEYDOWN and 256 < event.key < 264:
+                        action = int(event.key - 257)
+                        break
+
+                next_state, reward, done, info = self.env.step(action)
+                self.env.render()
+                if reward == 1:
+                    print("player 2 wins")
+                    event = pygame.event.wait()
 
 
 if __name__=="__main__":
-    agent = QLearning(epsilon=2)
-    agent.train()
+    with open('../q_table_1.pickle','rb') as file:
+        q_table = pickle.load(file)
+    agent = QLearning(q_table=q_table, epsilon=2)
+    agent.gameplay()
