@@ -7,12 +7,15 @@ import pickle
 import pygame
 import sys
 from pygame.locals import *
+import matplotlib.pyplot as plt
 
 class QLearning:
     def __init__(self, q_table={}, alpha=0.1, gamma=0.6, epsilon=0.1):
         self.alpha = alpha
         self.gamma = gamma
-        self.epsilon = epsilon
+        self.epsilon = 1  # epsilon
+        self.epsilon_min = 0.01  # epsilon
+        self.epsilon_decay = 0.995  #epsilon
         self.env = gym.make('Connect4-v0')
         self.q_table = q_table
         self.state = self.get_current_state()
@@ -32,15 +35,37 @@ class QLearning:
             return {}
         return 0
 
-    def get_best_move(self):
-        pass
+    def get_best_move(self, state, training=True):
+        if training and random.uniform(0, 1) < self.epsilon:
+            return random.sample(self.get_available_moves(), 1)[0]
+        else:
+            try:
+                action = max(self.get_qvalue(state).iteritems(), key=operator.itemgetter(1))[0]
+            except:
+                action = random.sample(self.get_available_moves(), 1)[0]
+            return action
 
-    def update_qvalue(self, state, action, value):
+    def update_qvalue(self, state, action, reward, next_state):
+        if reward == 1:
+            key = str(state)
+            if key in self.q_table.keys():
+                self.q_table[key][action] = 1
+            else:
+                self.q_table[key] = {action: 1}
+            return
+        # update Q Table
+        old_q = self.get_qvalue(state, action)
+        try:
+            next_max = max(self.get_qvalue(next_state).items(), key=operator.itemgetter(1))[1]
+        except ValueError as e:
+            next_max = 0
+        new_q = (1 - self.alpha) * old_q + self.alpha * (reward + self.gamma * next_max)
+
         key = str(state)
         if key in self.q_table.keys():
-            self.q_table[key][action] = value
+            self.q_table[key][action] = new_q
         else:
-            self.q_table[key] = {action: value}
+            self.q_table[key] = {action: new_q}
 
     def get_available_moves(self):
         valid_actions = []
@@ -49,11 +74,22 @@ class QLearning:
                 valid_actions.append(col)
         return valid_actions
 
-    def train(self, n_episodes=1000000):
+    def take_action(self,state, training):
+        action = self.get_best_move(state, training)
+        next_state, reward, done, info = self.env.step(action)
+        next_state = self.get_current_state()
+        self.update_qvalue(state, action, reward, next_state)
+        return action, reward, info
+
+    def train(self, n_episodes=10):#00000):
         """Training the agent"""
+        training = True
         for i in range(1, n_episodes):
+            if self.epsilon >= self.epsilon_min:
+                self.epsilon *= self.epsilon_decay
+
             self.env.reset()
-            state = self.state
+            state = self.get_current_state()
 
             epochs, penalties, reward = 0, 0, 0
             done = False
@@ -64,45 +100,28 @@ class QLearning:
                     break
 
                 # player 1 : Agent
-                if random.uniform(0, 1) < self.epsilon:
-                    action = random.sample(self.get_available_moves(), 1)[0]
-                    #action = random.sample(self.valid_actions, 1)[0]
-                else:
-                    pass
-                    #actions = [action for action in self.get_qvalue(state) if action in self.valid_actions]
-                    #action = max(self.get_qvalue(state).items(), key=operator.itemgetter(1))[0]
-                    #if len(actions) is 0:
-                    #    action = random.sample(self.valid_actions, 1)[0]
-                    #else:
-                    #    # need to alter it to select action for which q_value is max
-                    #    action = max(actions)
-                next_state, reward, done, info = self.env.step(action)
-                assert info['last_player'] == 1
-                next_state = self.env.board.board
 
-                # update Q Table
-                old_value = self.get_qvalue(state, action)
-                try:
-                    next_max = max(self.get_qvalue(next_state).items(), key=operator.itemgetter(1))[1]
-                except ValueError as e:
-                    next_max = 0
-                new_value = (1 - self.alpha) * old_value + self.alpha * (reward + self.gamma * next_max)
-                self.update_qvalue(state, action, new_value)
+                agent_action, reward, info = self.take_action(state, training)
+                #self.env.render()
 
-                if abs(reward) == 1:
+                if reward == 1:
                     break
-                self.env.render()
+
                 # player 2
-                #ret, valid_move_list = self.get_available_moves()
+
                 if len(self.get_available_moves()) is 0:
                     print("match draw!!")
                     break
-                #p2_action = random.sample(self.valid_actions, 1)[0]
                 p2_action = random.sample(self.get_available_moves(), 1)[0]
                 next_state, reward, done, info = self.env.step(p2_action)
-                self.env.render()
+                #self.env.render()
                 epochs += 1
-                if abs(reward) == 1:
+                if reward == 1:
+                    key = str(state)
+                    if key in self.q_table.keys():
+                        self.q_table[key][agent_action] = -1
+                    else:
+                        self.q_table[key] = {agent_action: -1}
                     break
 
             if i % 100 == 0:
@@ -115,7 +134,7 @@ class QLearning:
         with open('q_table.pickle', 'wb') as handle:
             pickle.dump(self.q_table, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    def gameplay(self):
+    def gameplay(self, metrics=False):
         while True:
             self.env.reset()
             state = self.state
@@ -128,7 +147,7 @@ class QLearning:
                     break
 
                 # player 1 : Agent
-                try :
+                try:
                     agent_action = max(self.get_qvalue(state).items(), key=operator.itemgetter(1))[0]
                 except:
                     agent_action = random.sample(self.get_available_moves(), 1)[0]
@@ -136,33 +155,67 @@ class QLearning:
                 next_state, reward, done, info = self.env.step(agent_action)
                 next_state = self.env.board.board
 
-                self.env.render()
+                if not metrics:
+                    self.env.render()
                 if reward == 1:
                     print("player 1 wins")
-                    event = pygame.event.wait()
+                    if metrics:
+                        return 1, 0
+                    pygame.time.wait(3000)
+                    sys.exit()
                     break
 
                 # player 2 : Take user Input
-                #pressed = pygame.key.get_pressed()
-                #print(pressed)
-                while True:
-                    event = pygame.event.wait()
-                    if event.type == QUIT:
-                        pygame.quit()
-                        sys.exit()
-                    elif event.type == KEYDOWN and 256 < event.key < 264:
-                        action = int(event.key - 257)
-                        break
+                if len(self.get_available_moves()) == 0:
+                    print("match draw!!")
+                    break
+
+                if metrics:
+                    action = random.sample(self.get_available_moves(), 1)[0]
+                else:
+                    while True:
+                        event = pygame.event.wait()
+                        if event.type == QUIT:
+                            pygame.quit()
+                            sys.exit()
+                        elif event.type == KEYDOWN and 256 < event.key < 264:
+                            action = int(event.key - 257)
+                            break
 
                 next_state, reward, done, info = self.env.step(action)
-                self.env.render()
+                if not metrics:
+                    self.env.render()
                 if reward == 1:
                     print("player 2 wins")
-                    event = pygame.event.wait()
+                    if metrics:
+                        return 0, 1
+                    pygame.time.wait(3000)
+                    sys.exit()
+
+    def get_result_metrics(self, n_games=100):
+        p1, p2 = 0, 0
+        fig = plt.figure()
+        for i in range(n_games):
+            print("Playing Game: {}".format(i))
+            p1_new, p2_new = self.gameplay(metrics=True)
+            p1 += p1_new
+            p2 += p2_new
+            if i % 100 == 0:
+                plt.plot(i, p1, 'bo')
+                plt.plot(i, p2, 'ro')
+                p1, p2 = 0, 0
+        print("player 1 wins: {}".format(p1))
+        print("player 2 wins: {}".format(p2))
+        plt.title('Game wins by each agent')
+        plt.legend(['Q Learning Agent', 'Random Agent'])
+        plt.show()
 
 
 if __name__=="__main__":
-    with open('../q_table_1.pickle','rb') as file:
+    with open('../q_table_1.pickle', 'rb') as file:
         q_table = pickle.load(file)
-    agent = QLearning(q_table=q_table, epsilon=2)
-    agent.gameplay()
+    agent = QLearning(q_table=q_table, epsilon=0)
+    #agent = QLearning()
+    #agent.train()
+    #agent.gameplay()
+    agent.get_result_metrics(1000)
